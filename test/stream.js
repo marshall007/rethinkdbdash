@@ -3,13 +3,14 @@ var r = require('../lib')(config);
 var util = require(__dirname+'/util/common.js');
 var assert = require('assert');
 var Readable = require('stream').Readable;
+var Writable = require('stream').Writable;
 
 var uuid = util.uuid;
 var It = util.It
 
 var dbName, tableName, tableName2, stream, result, pks, feed;
 
-var numDocs = 100; // Number of documents in the "big table" used to test the SUCCESS_PARTIAL 
+var numDocs = 100; // Number of documents in the "big table" used to test the SUCCESS_PARTIAL
 var smallNumDocs = 5; // Number of documents in the "small table"
 
 
@@ -18,12 +19,17 @@ It("Init for `stream.js`", function* (done) {
         dbName = uuid();
         tableName = uuid(); // Big table to test partial sequence
         tableName2 = uuid(); // small table to test success sequence
+        tableName3 = uuid(); // table to test streaming writes
 
         result = yield r.dbCreate(dbName).run()
         assert.equal(result.dbs_created, 1);
         //yield r.db(dbName).wait().run()
-        result = yield [r.db(dbName).tableCreate(tableName)('tables_created').run(), r.db(dbName).tableCreate(tableName2)('tables_created').run()]
-        assert.deepEqual(result, [1, 1]);
+        result = yield [
+            r.db(dbName).tableCreate(tableName)('tables_created').run(),
+            r.db(dbName).tableCreate(tableName2)('tables_created').run(),
+            r.db(dbName).tableCreate(tableName3)('tables_created').run()
+        ]
+        assert.deepEqual(result, [1, 1, 1]);
         done();
     }
     catch(e) {
@@ -290,3 +296,25 @@ It("Import with stream as default", function* (done) {
     }
 })
 
+
+It("Creates write stream", function* (done) {
+    var r1 = require('../lib')({stream: true, host: config.host, port: config.port, authKey: config.authKey, buffer: config.buffer, max: config.max});
+    var i=0;
+    try {
+        writable = r1.db(dbName).table(tableName3).createWriteStream({ batch: 10 });
+        assert(writable instanceof Writable);
+
+        stream = yield r1.db(dbName).table(tableName).run();
+
+        stream.pipe(writable)
+        .on('error', done)
+        .on('finish', function* () {
+            var count = yield r1.db(dbName).table(tableName3).count().run();
+            console.log('writable stream table rows:', count);
+            done();
+        });
+    }
+    catch(e) {
+        done(e);
+    }
+})
